@@ -253,7 +253,7 @@ def model_forecast(model, df, days):
        pred_f = model.predict(X)[0]
        pred = (pred_f - 32) * 5/9
 
-        preds.append(pred)
+       preds.append(pred)
 
     return preds
 
@@ -325,4 +325,5 @@ c1, c2, c3 = st.columns(3)
 c1.metric("MAE", MAE)
 c2.metric("RMSE", RMSE)
 c3.metric("R² Score", R2)
+
 
