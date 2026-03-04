@@ -4,3 +4,5 @@ numpy
 plotly
 joblib
 streamlit-autorefresh
+xgboost
+scikit-learn
