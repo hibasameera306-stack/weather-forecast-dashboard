@@ -2,24 +2,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
-
-# ---------------------------------------------------
-# Page configuration
-# ---------------------------------------------------
 
 st.set_page_config(page_title="Weather Forecast Dashboard", layout="wide")
 
 st.title("🌤 Weather Forecast Analytics Dashboard")
 
-# auto refresh every 10 minutes
+# Auto refresh every 10 minutes
 st_autorefresh(interval=600000, key="refresh")
 
-# ---------------------------------------------------
+# -------------------------------------------------
 # Load Models
-# ---------------------------------------------------
+# -------------------------------------------------
 
 @st.cache_resource
 def load_models():
@@ -29,9 +25,9 @@ def load_models():
 
 tmax_model, tmin_model = load_models()
 
-# ---------------------------------------------------
+# -------------------------------------------------
 # Load Data
-# ---------------------------------------------------
+# -------------------------------------------------
 
 @st.cache_data
 def load_data():
@@ -42,22 +38,26 @@ def load_data():
     tmax_df["date"] = pd.to_datetime(tmax_df["date"])
     tmin_df["date"] = pd.to_datetime(tmin_df["date"])
 
-    # convert Fahrenheit → Celsius
-    tmax_df["tmax"] = (tmax_df["tmax"] - 32) * 5/9
-    tmin_df["tmin"] = (tmin_df["tmin"] - 32) * 5/9
+    # Convert Fahrenheit → Celsius
+    if "tmax" in tmax_df.columns:
+        tmax_df["tmax"] = (tmax_df["tmax"] - 32) * 5/9
+
+    if "tmin" in tmin_df.columns:
+        tmin_df["tmin"] = (tmin_df["tmin"] - 32) * 5/9
 
     return tmax_df, tmin_df
 
+
 tmax_df, tmin_df = load_data()
 
-# ---------------------------------------------------
-# Sidebar
-# ---------------------------------------------------
+# -------------------------------------------------
+# Sidebar Controls
+# -------------------------------------------------
 
 st.sidebar.header("Dashboard Controls")
 
 temp_type = st.sidebar.selectbox(
-    "Temperature Type",
+    "Select Temperature Type",
     ["TMAX", "TMIN"]
 )
 
@@ -68,9 +68,9 @@ forecast_days = st.sidebar.slider(
     7
 )
 
-# ---------------------------------------------------
+# -------------------------------------------------
 # Select dataset
-# ---------------------------------------------------
+# -------------------------------------------------
 
 if temp_type == "TMAX":
 
@@ -84,9 +84,10 @@ else:
     model = tmin_model
     temp_col = "tmin"
 
-# ---------------------------------------------------
-# Summary metrics
-# ---------------------------------------------------
+
+# -------------------------------------------------
+# Temperature Summary
+# -------------------------------------------------
 
 st.subheader("Temperature Summary")
 
@@ -96,9 +97,10 @@ c1.metric("Latest Temperature", f"{df[temp_col].iloc[-1]:.2f} °C")
 c2.metric("Average Temperature", f"{df[temp_col].mean():.2f} °C")
 c3.metric("Maximum Temperature", f"{df[temp_col].max():.2f} °C")
 
-# ---------------------------------------------------
-# Extreme temperature alerts
-# ---------------------------------------------------
+
+# -------------------------------------------------
+# Extreme Temperature Alerts
+# -------------------------------------------------
 
 st.subheader("Extreme Temperature Alerts")
 
@@ -111,48 +113,36 @@ upper = mean_temp + 2 * std_temp
 lower = mean_temp - 2 * std_temp
 
 if recent_temp > upper:
-
     st.error(f"🔥 Extreme Heat Alert: {recent_temp:.2f} °C")
 
 elif recent_temp < lower:
-
     st.warning(f"❄ Extreme Cold Alert: {recent_temp:.2f} °C")
 
 else:
-
     st.success("Temperature within normal range")
 
-# ---------------------------------------------------
-# Historical chart
-# ---------------------------------------------------
 
-st.subheader("Historical Temperature (Last 1 Year)")
+# -------------------------------------------------
+# Historical Temperature Chart
+# -------------------------------------------------
+
+st.subheader("Historical Temperature (Last Year)")
 
 recent_df = df.tail(365)
 
-fig_hist = go.Figure()
-
-fig_hist.add_trace(
-    go.Scatter(
-        x=recent_df["date"],
-        y=recent_df[temp_col],
-        mode="lines",
-        line=dict(color="royalblue", width=3),
-        name="Temperature"
-    )
-)
-
-fig_hist.update_layout(
-    xaxis_title="Date",
-    yaxis_title="Temperature (°C)",
-    height=450
+fig_hist = px.line(
+    recent_df,
+    x="date",
+    y=temp_col,
+    labels={"date": "Date", temp_col: "Temperature (°C)"}
 )
 
 st.plotly_chart(fig_hist, use_container_width=True)
 
-# ---------------------------------------------------
+
+# -------------------------------------------------
 # Seasonality Analysis
-# ---------------------------------------------------
+# -------------------------------------------------
 
 st.subheader("Seasonality Analysis")
 
@@ -171,9 +161,10 @@ fig_season = px.line(
 
 st.plotly_chart(fig_season, use_container_width=True)
 
-# ---------------------------------------------------
+
+# -------------------------------------------------
 # Monthly Heatmap
-# ---------------------------------------------------
+# -------------------------------------------------
 
 st.subheader("Monthly Temperature Heatmap")
 
@@ -191,20 +182,20 @@ pivot = heat_df.pivot_table(
 
 fig_heat = px.imshow(
     pivot,
-    labels=dict(x="Month", y="Year", color="Temp (°C)"),
+    labels=dict(x="Month", y="Year", color="Temp °C"),
     aspect="auto"
 )
 
 st.plotly_chart(fig_heat, use_container_width=True)
 
-# ---------------------------------------------------
+
+# -------------------------------------------------
 # Climate Trend Analysis
-# ---------------------------------------------------
+# -------------------------------------------------
 
 st.subheader("Climate Trend Analysis")
 
 trend_df = df.copy()
-
 trend_df["year"] = trend_df["date"].dt.year
 
 yearly = trend_df.groupby("year")[temp_col].mean().reset_index()
@@ -213,7 +204,6 @@ x = yearly["year"]
 y = yearly[temp_col]
 
 coeff = np.polyfit(x, y, 1)
-
 trend = np.poly1d(coeff)
 
 yearly["trend"] = trend(x)
@@ -225,7 +215,7 @@ fig_trend.add_trace(
         x=yearly["year"],
         y=yearly[temp_col],
         mode="lines+markers",
-        name="Average Temperature"
+        name="Average Temp"
     )
 )
 
@@ -241,46 +231,35 @@ fig_trend.add_trace(
 
 st.plotly_chart(fig_trend, use_container_width=True)
 
-slope = coeff[0]
 
-if slope > 0:
-    st.success(f"🌡 Warming trend: +{slope:.3f} °C per year")
-else:
-    st.info(f"Cooling trend: {slope:.3f} °C per year")
-
-# ---------------------------------------------------
-# Forecast function using model
-# ---------------------------------------------------
+# -------------------------------------------------
+# Forecast Function
+# -------------------------------------------------
 
 def model_forecast(model, df, days):
 
     preds = []
 
-    temp_series = df[temp_col].copy()
+    last_row = df.iloc[-1:].copy()
+
+    drop_cols = ["date", "tmax", "tmin"]
+
+    feature_cols = [c for c in df.columns if c not in drop_cols]
+
+    X = last_row[feature_cols]
 
     for i in range(days):
-
-        lag1 = temp_series.iloc[-1]
-        lag2 = temp_series.iloc[-2]
-        lag7 = temp_series.iloc[-7]
-        lag30 = temp_series.iloc[-30]
-
-        X = np.array([[lag1, lag2, lag7, lag30]])
 
         pred = model.predict(X)[0]
 
         preds.append(pred)
 
-        temp_series = pd.concat(
-            [temp_series, pd.Series([pred])],
-            ignore_index=True
-        )
-
     return preds
 
-# ---------------------------------------------------
-# Forecast
-# ---------------------------------------------------
+
+# -------------------------------------------------
+# Generate Forecast
+# -------------------------------------------------
 
 if st.sidebar.button("Generate Forecast"):
 
@@ -295,9 +274,6 @@ if st.sidebar.button("Generate Forecast"):
         "date": future_dates,
         "forecast": preds
     })
-
-    forecast_df["upper"] = forecast_df["forecast"] + 1
-    forecast_df["lower"] = forecast_df["forecast"] - 1
 
     st.subheader("Temperature Forecast")
 
@@ -319,28 +295,8 @@ if st.sidebar.button("Generate Forecast"):
             x=forecast_df["date"],
             y=forecast_df["forecast"],
             mode="lines+markers",
-            line=dict(dash="dash"),
-            name="Forecast"
-        )
-    )
-
-    fig_fore.add_trace(
-        go.Scatter(
-            x=forecast_df["date"],
-            y=forecast_df["upper"],
-            line=dict(width=0),
-            showlegend=False
-        )
-    )
-
-    fig_fore.add_trace(
-        go.Scatter(
-            x=forecast_df["date"],
-            y=forecast_df["lower"],
-            fill="tonexty",
-            fillcolor="rgba(255,165,0,0.2)",
-            line=dict(width=0),
-            name="Confidence Range"
+            name="Forecast",
+            line=dict(dash="dash")
         )
     )
 
@@ -352,9 +308,10 @@ if st.sidebar.button("Generate Forecast"):
 
     st.dataframe(forecast_df)
 
-# ---------------------------------------------------
+
+# -------------------------------------------------
 # Model Performance
-# ---------------------------------------------------
+# -------------------------------------------------
 
 st.subheader("Model Performance")
 
@@ -362,8 +319,8 @@ MAE = 0.95
 RMSE = 1.20
 R2 = 0.82
 
-m1, m2, m3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-m1.metric("MAE", MAE)
-m2.metric("RMSE", RMSE)
-m3.metric("R² Score", R2)
+c1.metric("MAE", MAE)
+c2.metric("RMSE", RMSE)
+c3.metric("R² Score", R2)
