@@ -3,16 +3,15 @@ import pandas as pd
 import numpy as np
 import joblib
 import plotly.graph_objects as go
-import plotly.express as px
 import os
 
 st.set_page_config(page_title="Weather Forecast Dashboard", layout="wide")
 
 st.title("🌤 Weather Forecast Analytics Dashboard")
 
-# -----------------------------
+# -------------------------------------------------
 # LOAD DATA
-# -----------------------------
+# -------------------------------------------------
 
 @st.cache_data
 def load_data():
@@ -20,7 +19,7 @@ def load_data():
     file_path = "4245930.csv"
 
     if not os.path.exists(file_path):
-        st.error("Dataset file 4245930.csv not found in repository.")
+        st.error("Dataset file '4245930.csv' not found in repository.")
         st.stop()
 
     df = pd.read_csv(file_path)
@@ -31,6 +30,10 @@ def load_data():
 
     df = df.sort_values("date")
 
+    # Convert Fahrenheit to Celsius
+    df["tmax"] = (df["tmax"] - 32) * 5/9
+    df["tmin"] = (df["tmin"] - 32) * 5/9
+
     df["tmax"] = df["tmax"].interpolate().bfill().ffill()
     df["tmin"] = df["tmin"].interpolate().bfill().ffill()
 
@@ -39,12 +42,20 @@ def load_data():
 
 df = load_data()
 
-# -----------------------------
+# -------------------------------------------------
 # LOAD MODELS
-# -----------------------------
+# -------------------------------------------------
 
 @st.cache_resource
 def load_models():
+
+    if not os.path.exists("tmax_model.pkl"):
+        st.error("tmax_model.pkl not found")
+        st.stop()
+
+    if not os.path.exists("tmin_model.pkl"):
+        st.error("tmin_model.pkl not found")
+        st.stop()
 
     tmax_model = joblib.load("tmax_model.pkl")
     tmin_model = joblib.load("tmin_model.pkl")
@@ -54,9 +65,9 @@ def load_models():
 
 tmax_model, tmin_model = load_models()
 
-# -----------------------------
-# SIDEBAR
-# -----------------------------
+# -------------------------------------------------
+# SIDEBAR SETTINGS
+# -------------------------------------------------
 
 st.sidebar.header("Forecast Settings")
 
@@ -79,179 +90,167 @@ else:
     temp_col = "tmin"
     model = tmin_model
 
-# -----------------------------
+# -------------------------------------------------
 # SUMMARY METRICS
-# -----------------------------
+# -------------------------------------------------
 
 st.subheader("Temperature Summary")
 
-c1, c2, c3 = st.columns(3)
+col1, col2, col3 = st.columns(3)
 
-c1.metric("Latest", f"{df[temp_col].iloc[-1]:.2f} °C")
-c2.metric("Average", f"{df[temp_col].mean():.2f} °C")
-c3.metric("Max", f"{df[temp_col].max():.2f} °C")
+latest_temp = df[temp_col].iloc[-1]
+avg_temp = df[temp_col].mean()
+max_temp = df[temp_col].max()
 
-# -----------------------------
+col1.metric("Latest", f"{latest_temp:.1f} °C")
+col2.metric("Average", f"{avg_temp:.1f} °C")
+col3.metric("Max", f"{max_temp:.1f} °C")
+
+# -------------------------------------------------
 # EXTREME ALERT
-# -----------------------------
+# -------------------------------------------------
 
 st.subheader("Extreme Temperature Alert")
 
 high = df[temp_col].quantile(0.95)
 low = df[temp_col].quantile(0.05)
 
-latest = df[temp_col].iloc[-1]
-
-if latest > high:
+if latest_temp > high:
     st.error("🔥 Extreme Heat Alert")
 
-elif latest < low:
+elif latest_temp < low:
     st.warning("❄ Extreme Cold Alert")
 
 else:
     st.success("Temperature Normal")
 
-# -----------------------------
+# -------------------------------------------------
 # HISTORICAL CHART
-# -----------------------------
+# -------------------------------------------------
 
 st.subheader("Historical Temperature")
 
-fig = go.Figure()
+fig_hist = go.Figure()
 
-fig.add_trace(
+fig_hist.add_trace(
     go.Scatter(
         x=df["date"],
         y=df[temp_col],
         mode="lines",
-        name="Temperature"
+        name="Temperature (°C)"
     )
 )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig_hist, use_container_width=True)
 
-# -----------------------------
-# SEASONAL HEATMAP
-# -----------------------------
+# -------------------------------------------------
+# FEATURE CREATION
+# -------------------------------------------------
 
-st.subheader("Seasonality Heatmap")
+def create_features(data, column):
 
-df["month"] = df["date"].dt.month
-df["year"] = df["date"].dt.year
+    data = data.copy()
 
-heat = df.pivot_table(
-    values=temp_col,
-    index="year",
-    columns="month",
-    aggfunc="mean"
-)
+    data["lag1"] = data[column].shift(1)
+    data["lag2"] = data[column].shift(2)
+    data["lag7"] = data[column].shift(7)
+    data["lag30"] = data[column].shift(30)
 
-fig_heat = px.imshow(
-    heat,
-    color_continuous_scale="RdYlBu_r",
-    aspect="auto"
-)
+    data["rolling7"] = data[column].rolling(7).mean()
+    data["rolling30"] = data[column].rolling(30).mean()
 
-st.plotly_chart(fig_heat, use_container_width=True)
+    data["dayofyear"] = data["date"].dt.dayofyear
+    data["dayofweek"] = data["date"].dt.dayofweek
 
-# -----------------------------
+    return data
+
+# -------------------------------------------------
 # FORECAST FUNCTION
-# -----------------------------
+# -------------------------------------------------
 
-def forecast_recursive(model, df, n_days):
+def forecast_temperature(model, df, column, days):
 
-    df_hist = df.copy()
+    df_copy = df.copy()
 
     preds = []
 
-    for i in range(n_days):
+    for i in range(days):
 
-        next_date = df_hist["date"].max() + pd.Timedelta(days=1)
+        df_copy = create_features(df_copy, column)
 
-        new_row = pd.DataFrame({
-            "date": [next_date],
-            temp_col: [np.nan]
-        })
-
-        df_hist = pd.concat([df_hist, new_row], ignore_index=True)
-
-        df_hist["day_of_year"] = df_hist["date"].dt.dayofyear
-        df_hist["day_of_week"] = df_hist["date"].dt.dayofweek
-
-        df_hist["lag1"] = df_hist[temp_col].shift(1)
-        df_hist["lag2"] = df_hist[temp_col].shift(2)
-        df_hist["lag7"] = df_hist[temp_col].shift(7)
-        df_hist["lag30"] = df_hist[temp_col].shift(30)
-
-        df_hist["roll7"] = df_hist[temp_col].rolling(7).mean()
-        df_hist["roll30"] = df_hist[temp_col].rolling(30).mean()
+        last_row = df_copy.iloc[-1:]
 
         features = [
-            "lag1", "lag2", "lag7", "lag30",
-            "roll7", "roll30",
-            "day_of_year", "day_of_week"
+            "lag1","lag2","lag7","lag30",
+            "rolling7","rolling30",
+            "dayofyear","dayofweek"
         ]
 
-        X = df_hist.iloc[-1:][features]
+        X = last_row[features]
 
         X = X.fillna(method="bfill")
 
-        pred = model.predict(X)[0]
+        pred_f = model.predict(X)[0]
 
-        df_hist.loc[df_hist.index[-1], temp_col] = pred
+        # convert prediction to Celsius
+        pred_c = (pred_f - 32) * 5/9
 
-        preds.append(pred)
+        next_date = df_copy["date"].max() + pd.Timedelta(days=1)
+
+        new_row = pd.DataFrame({
+            "date":[next_date],
+            column:[pred_c]
+        })
+
+        df_copy = pd.concat([df_copy,new_row],ignore_index=True)
+
+        preds.append(pred_c)
 
     return preds
 
-
-# -----------------------------
-# GENERATE FORECAST
-# -----------------------------
+# -------------------------------------------------
+# FORECAST BUTTON
+# -------------------------------------------------
 
 if st.sidebar.button("Generate Forecast"):
 
-    preds = forecast_recursive(
-        model,
-        df[["date", temp_col]],
-        forecast_days
-    )
+    preds = forecast_temperature(model, df[["date",temp_col]], temp_col, forecast_days)
 
     future_dates = pd.date_range(
         df["date"].max(),
-        periods=forecast_days + 1
+        periods=forecast_days+1
     )[1:]
 
     forecast_df = pd.DataFrame({
-        "date": future_dates,
-        "forecast": preds
+        "Date":future_dates,
+        "Forecast (°C)":np.round(preds,2)
     })
 
-    st.subheader("Forecast")
+    st.subheader("Temperature Forecast")
 
     history = df.tail(60)
 
-    fig2 = go.Figure()
+    fig = go.Figure()
 
-    fig2.add_trace(
+    fig.add_trace(
         go.Scatter(
             x=history["date"],
             y=history[temp_col],
             mode="lines",
-            name="Recent Temperature"
+            name="Recent Temperature (°C)"
         )
     )
 
-    fig2.add_trace(
+    fig.add_trace(
         go.Scatter(
-            x=forecast_df["date"],
-            y=forecast_df["forecast"],
+            x=future_dates,
+            y=preds,
             mode="lines+markers",
-            name="Forecast"
+            name="Forecast (°C)"
         )
     )
 
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Forecast Table")
 
